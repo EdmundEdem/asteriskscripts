@@ -1,0 +1,183 @@
+#!/bin/bash
+# DEVELOPED TO WORK ON ISSABEL PBX, NOT ON ELASTIX
+
+#DB SERVER CONNECTION PARAMETERS
+# HOSTDB=INTERNAL IP ADDRESS OF DB SERVER
+# USERDB=RECOMMENDED TO NOT CHANGE IT
+# PASSDB=RECOMMENDED TO NOT CHANGE IT
+HOSTDB="x.x.x.x"
+USERDB="pelrs"
+PASSDB="1111xx.com"
+
+# PASSROOTDB=MYSQL ROOT PASSWORD OF DB SERVER
+PASSROOTDB="1111xx.com" 
+
+# LOCALIP=INTERNAL IP ADDRESS OF THIS SERVER
+LOCALIP="x.x.x.x" 
+
+echo "1. ---------- DB DUMP: ASTERISK,ASTERISKCDRDB,MEETME,ENDPOINTCONFIG"
+BCKDB="asterisk asteriskcdrdb meetme endpointconfig"
+SQLFILE_NAME="$(date +%Y%m%d-%H%M%S).sql"
+for DB in $BCKDB
+do
+    if [ -f /etc/issabel.conf ]
+    then
+        mysqldump --routines --databases --add-drop-database --add-drop-table -u root -p`cat /etc/issabel.conf | grep mysqlrootpwd | cut -c 14-` $DB > $(pwd)/$DB-$SQLFILE_NAME
+        echo "CMD: mysqldump --routines --databases --add-drop-database --add-drop-table -u root -p`cat /etc/issabel.conf | grep mysqlrootpwd | cut -c 14-` $DB > $(pwd)/$DB-$SQLFILE_NAME"
+    else
+        mysqldump --routines --databases --add-drop-database --add-drop-table -u root -p`cat /etc/elastix.conf | grep mysqlrootpwd | cut -c 14-` $DB > $(pwd)/$DB-$SQLFILE_NAME
+        echo "CMD: mysqldump --routines --databases --add-drop-database --add-drop-table -u root -p`cat /etc/elastix.conf | grep mysqlrootpwd | cut -c 14-` $DB > $(pwd)/$DB-$SQLFILE_NAME"
+    fi
+done
+echo ""
+
+ASTERISK="/etc/asterisk/cbmysql.conf /etc/asterisk/cdr_mysql.conf /etc/asterisk/res_mysql.conf" 
+ASTERISK="$ASTERISK /etc/asterisk/res_config_mysql.conf /etc/asterisk/extensions_additional.conf" 
+ASTERISK="$ASTERISK /etc/amportal.conf /etc/issabelpbx.conf"
+echo ""
+echo "2. ---------- WILL CHANGE ASTERISK FILES"
+echo "FILES: $ASTERISK"
+echo ""
+ 
+for ASTFILE in $ASTERISK
+do
+    echo "FILE $ASTFILE WILL BE CHANGED"
+    HOSTDB_WILDCARD="hostname"
+    USERDB_WILDCARD="user"
+    PASSDB_WILDCARD="password"
+    
+    HOSTDBFOR=$HOSTDB
+    USERDBFOR=$USERDB
+    PASSDBFOR=$PASSDB
+
+    if [ $ASTFILE = "/etc/asterisk/extensions_additional.conf" ] || [ $ASTFILE = "/etc/amportal.conf" ]
+    then
+        HOSTDB_WILDCARD="AMPDBHOST"
+        USERDB_WILDCARD="AMPDBUSER"
+        PASSDB_WILDCARD="AMPDBPASS"
+    elif [ $ASTFILE = "/etc/asterisk/res_mysql.conf" ] || [ $ASTFILE = "/etc/asterisk/res_config_mysql.conf" ]
+    then
+       HOSTDB_WILDCARD="dbhost"
+       USERDB_WILDCARD="dbuser"
+       PASSDB_WILDCARD="dbpass"
+    elif [ $ASTFILE = "/etc/issabelpbx.conf" ]
+    then
+       HOSTDB_WILDCARD="\$amp_conf\['AMPDBHOST'\]"
+       USERDB_WILDCARD="\$amp_conf\['AMPDBUSER'\]"
+       PASSDB_WILDCARD="\$amp_conf\['AMPDBPASS'\]"   
+
+       HOSTDBFOR="'$HOSTDB';"
+       USERDBFOR="'$USERDB';"
+       PASSDBFOR="'$PASSDB';"
+    fi    
+
+    echo "BEFORE: "
+    grep "$HOSTDB_WILDCARD\s*=" $ASTFILE
+    grep "$USERDB_WILDCARD\s*=" $ASTFILE
+    grep "$PASSDB_WILDCARD\s*=" $ASTFILE
+    
+    sed -i "s|$HOSTDB_WILDCARD\s*=.*|$HOSTDB_WILDCARD = $HOSTDBFOR|" $ASTFILE
+    sed -i "s|$USERDB_WILDCARD\s*=.*|$USERDB_WILDCARD = $USERDBFOR|" $ASTFILE
+    sed -i "s|$PASSDB_WILDCARD\s*=.*|$PASSDB_WILDCARD = $PASSDBFOR|" $ASTFILE
+
+    echo "NOW: "
+    grep "$HOSTDB_WILDCARD\s*=" $ASTERISKCONFDIR/$ASTFILE
+    grep "$USERDB_WILDCARD\s*=" $ASTERISKCONFDIR/$ASTFILE
+    grep "$PASSDB_WILDCARD\s*=" $ASTERISKCONFDIR/$ASTFILE
+done
+echo ""
+
+echo ""
+echo "3. ---------- WILL CHANGE MYSQL ROOT PASSWORD ON /etc/issabel.conf"
+echo "BEFORE: "
+grep "mysqlrootpwd\s*=" /etc/issabel.conf
+sed -i "s|mysqlrootpwd\s*=.*|mysqlrootpwd=$PASSROOTDB|" /etc/issabel.conf
+echo "NOW: "
+grep "mysqlrootpwd\s*=" /etc/issabel.conf
+echo ""
+
+echo ""
+echo "4. ---------- WILL CHANGE WEB FILES"
+
+echo ""
+echo "FILE /var/www/html/libs/misc.lib.php WILL BE CHANGED"
+echo "BEFORE: "
+grep "return\s*'mysql.*" /var/www/html/libs/misc.lib.php
+sed -i "s|return\s*'mysql.*|return 'mysql://root:'.\$sClave.'@$HOSTDB/'.\$sNombreDB;|" /var/www/html/libs/misc.lib.php
+echo "NOW: "
+grep "return\s*'mysql" /var/www/html/libs/misc.lib.php
+
+echo ""
+echo "FILE /var/www/html/modules/agent_console/libs/issabel2.lib.php WILL BE CHANGED"
+echo "BEFORE: "
+grep "return\s*'mysql.*" /var/www/html/modules/agent_console/libs/issabel2.lib.php
+sed -i "s|return\s*'mysql.*|return 'mysql://root:'.\$sClave.'@$HOSTDB/'.\$sNombreDB;|" /var/www/html/modules/agent_console/libs/issabel2.lib.php
+echo "NOW: "
+grep "return\s*'mysql" /var/www/html/modules/agent_console/libs/issabel2.lib.php
+
+echo ""
+echo "FILE /var/www/html/libs/paloSantoInstaller.class.php WILL BE CHANGED"
+echo "BEFORE: "
+grep "mysql://root:.*" /var/www/html/libs/paloSantoInstaller.class.php
+grep "\$datos_conexion\['locate'\] = \".*" /var/www/html/libs/paloSantoInstaller.class.php
+grep "\$comando=\"mysql --.*" /var/www/html/libs/paloSantoInstaller.class.php
+sed -i "s|mysql://root:.*|mysql://root:'.\$root_password.'@$HOSTDB/';|" /var/www/html/libs/paloSantoInstaller.class.php
+sed -i "s|\$datos_conexion\['locate'\] = \".*|\$datos_conexion\['locate'\] = \"$HOSTDB\";|" /var/www/html/libs/paloSantoInstaller.class.php
+sed -i "s|\$comando=\"mysql --.*|\$comando=\"mysql --host=$HOSTDB --password=\".escapeshellcmd(\$root_password).\" --user=root \$db_name < \$path_script_db\";|" /var/www/html/libs/paloSantoInstaller.class.php
+echo "NOW: "
+grep "mysql://root:.*" /var/www/html/libs/paloSantoInstaller.class.php
+grep "\$datos_conexion\['locate'\] = \".*" /var/www/html/libs/paloSantoInstaller.class.php
+grep "\$comando=\"mysql --.*" /var/www/html/libs/paloSantoInstaller.class.php
+
+echo ""
+echo "FILE /var/www/html/modules/cb_extensions/libs/Agentes.class.php WILL BE CHANGED"
+echo "BEFORE: "
+grep "mysql://asteriskuser:.*" /var/www/html/modules/cb_extensions/libs/Agentes.class.php
+sed -i "s|mysql://asteriskuser:.*|mysql://asteriskuser:\{\$sPwdFreepbx\}@$HOSTDB/asterisk\";|" /var/www/html/modules/cb_extensions/libs/Agentes.class.php
+echo "NOW: "
+grep "mysql://asteriskuser:.*" /var/www/html/modules/cb_extensions/libs/Agentes.class.php
+
+echo ""
+echo "FILE /var/www/html/modules/sec_advanced_settings/libs/paloSantoChangePassword.class.php WILL BE CHANGED"
+echo "BEFORE: "
+grep "GRANT USAGE ON *.* TO 'asteriskuser'@.*" /var/www/html/modules/sec_advanced_settings/libs/paloSantoChangePassword.class.php
+sed -i "s|GRANT USAGE ON *.* TO 'asteriskuser'@.*|GRANT USAGE ON *.* TO 'asteriskuser'@'$HOSTDB' IDENTIFIED BY '\$fpbx_password' \";|" /var/www/html/modules/sec_advanced_settings/libs/paloSantoChangePassword.class.php
+echo "NOW: "
+grep "GRANT USAGE ON *.* TO 'asteriskuser'@.*" /var/www/html/modules/sec_advanced_settings/libs/paloSantoChangePassword.class.php
+
+echo ""
+echo ""
+echo "DUMP FILES CREATED: $(pwd)/*-$SQLFILE_NAME"
+echo "NOTE: DUMP FILES HAVE CREATE/DROP DATABASE OPTION (THIS MEANS THAT IF THERE IS A DB AT $HOSTDB WILL BE DELETED)"
+echo "      DUMP FILES HAVE CREATE/DROP TABLE OPTION (THIS MEANS THAT IF THERE IS A TABLE AT $HOSTDB WILL BE DELETED)"
+echo "      DATABASE NAME $BCKDB WONT BE ABLE TO HAVE A DIFFERENT NAME"
+
+echo ""
+echo "5. ---------- MISC ACTIONS THAT YOU NEED TO DO MANUALLY"
+echo " - COPY DUMP FILES $(pwd)/*-$SQLFILE_NAME INTO $HOSTDB"
+echo " - AT $HOSTDB LOAD DBs WITH THE FOLLOWING COMMANDS:"
+echo "   mysql -u root -p < asterisk-$SQLFILE_NAME"
+echo "   mysql -u root -p < asteriskcdrdb-$SQLFILE_NAME"
+echo "   mysql -u root -p < meetme-$SQLFILE_NAME"
+echo "   mysql -u root -p < endpointconfig-$SQLFILE_NAME"
+echo " - LOGIN INTO MYSQL CLI AT $HOSTDB AND EXECUTE: "
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON asterisk.* TO '$USERDB'@'localhost' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON asterisk.* TO '$USERDB'@'$HOSTDB' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON asterisk.* TO '$USERDB'@'$LOCALIP' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON asteriskcdrdb.* TO '$USERDB'@'localhost' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON asteriskcdrdb.* TO '$USERDB'@'$HOSTDB' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON asteriskcdrdb.* TO '$USERDB'@'$LOCALIP' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON meetme.* TO '$USERDB'@'localhost' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON meetme.* TO '$USERDB'@'$HOSTDB' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON meetme.* TO '$USERDB'@'$LOCALIP' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON endpointconfig.* TO '$USERDB'@'localhost' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON endpointconfig.* TO '$USERDB'@'$HOSTDB' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON endpointconfig.* TO '$USERDB'@'$LOCALIP' IDENTIFIED BY '$PASSDB';"
+echo "   FLUSH PRIVILEGES;"
+
+echo ""
+echo "6. ---------- RELOAD DIALPLAN"
+echo " EXECUTE THE FOLLOWING COMMANDS ONLY IF ALL COMMANDS FROM PREVIOUS STEP COMPLETED SUCCESSFULLY"
+echo " EXECUTE THE FOLLOWING COMMANDS ON THIS SERVER"
+echo "   /usr/sbin/amportal admin reload"
+echo "   /usr/sbin/amportal restart"

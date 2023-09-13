@@ -1,0 +1,84 @@
+#!/bin/bash
+
+# DEVELOPED TO WORK ON ISSABEL PBX, NOT ON ELASTIX
+
+#DB SERVER CONNECTION PARAMETERS
+# HOSTDB=INTERNAL IP ADDRESS OF DB SERVER
+# USERDB=RECOMMENDED TO NOT CHANGE IT
+# PASSDB=RECOMMENDED TO NOT CHANGE IT
+# ISSABELPBX=INTERNAL IP ADDRESS OF THIS SERVER
+HOSTDB="x.x.x.x"
+USERDB="riskk"
+PASSDB="atirisk"
+ISSABELPBX="x.x.x.x"
+
+MODULESPATH="/var/www/html/modules"
+NEWSTRING_CONNECT="mysql://$USERDB:$PASSDB@$HOSTDB/call_center"
+
+MODULES="agent_console campaign_out dont_call_list external_url queues client"
+MODULES="$MODULES campaign_in agents eccp_users cb_extensions break_administrator form_designer"
+MODULES="$MODULES form_list reports_break calls_detail calls_per_hour calls_per_agent"
+MODULES="$MODULES hold_time login_logout ingoings_calls_success graphic_calls"
+MODULES="$MODULES rep_agent_information rep_agents_monitoring rep_trunks_used_per_hour"
+MODULES="$MODULES rep_incoming_calls_monitoring campaign_monitoring callcenter_config"
+
+echo "1. ---------- WILL CHANGE CALLCENTER MODULES"
+echo "MODULES: $MODULES"
+echo ""
+ 
+for MODULE in $MODULES
+do
+    CONFIGPATH="configs/default.conf.php"
+    if [ $MODULE = "ingoings_calls_success" ] || [ $MODULE = "queues" ]
+    then
+       CONFIGPATH="configs/default.config.php"
+    elif [ $MODULE = "client" ]
+    then
+       CONFIGPATH="configs/config.php"
+    fi
+        
+    echo "MODULE $MODULESPATH/$MODULE"
+    echo "CONFIG $MODULESPATH/$MODULE/$CONFIGPATH WILL BE CHANGED"
+
+    echo -n "BEFORE: " 
+    grep call_center $MODULESPATH/$MODULE/$CONFIGPATH    
+    sed -i "s|mysql.*call_center|$NEWSTRING_CONNECT|" $MODULESPATH/$MODULE/$CONFIGPATH
+    echo -n "NOW: "
+    grep call_center $MODULESPATH/$MODULE/$CONFIGPATH
+    echo ""
+done
+
+echo ""
+echo "2. ---------- WILL CHANGE GLOBAL CONFIG FRAMEWORK"
+echo "FRAMEWORK /var/www/html"
+echo "CONFIG    /var/www/html/$CONFIGPATH WILL BE CHNAGED"
+echo -n "BEFORE: "
+grep call_center /var/www/html/$CONFIGPATH
+sed -i "s|mysql.*call_center|$NEWSTRING_CONNECT|" /var/www/html/$CONFIGPATH
+echo -n "NOW: "
+grep call_center /var/www/html/$CONFIGPATH
+echo ""
+
+echo ""
+echo "3. ---------- WILL CHANGE DIALERD"
+echo "DIALERD /opt/*/dialer"
+echo "CONFIG  /opt/*/dialer/dialerd.conf WILL BE CHANGED"
+echo -n "BEFORE: "
+cat /opt/*/dialer/dialerd.conf
+sed -i "s|dbhost=.*|dbhost=$HOSTDB|" /opt/*/dialer/dialerd.conf
+sed -i "s|dbuser=.*|dbuser=$USERDB|" /opt/*/dialer/dialerd.conf
+sed -i "s|dbpass=.*|dbpass=$PASSDB|" /opt/*/dialer/dialerd.conf
+echo -n "NOW: "
+cat /opt/*/dialer/dialerd.conf
+echo ""
+
+
+echo ""
+echo "5. ---------- ADDITIONAL SETTINGS"
+echo " - LOGIN INTO MYSQL CONSOLE AT SERVER $HOSTDB AND EXECUTE: "
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON call_center.* TO '$USERDB'@'localhost' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON call_center.* TO '$USERDB'@'$HOSTDB' IDENTIFIED BY '$PASSDB';"
+echo "   GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES, LOCK TABLES ON call_center.* TO '$USERDB'@'$ISSABELPBX' IDENTIFIED BY '$PASSDB';"
+echo "   FLUSH PRIVILEGES;"
+echo " - AT $ISSABELPBX SERVER, EXECUTE COMMAND:"
+echo "   systemctl restart issabeldialer"
